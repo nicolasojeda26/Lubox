@@ -1,9 +1,8 @@
 (() => {
   const STORAGE_KEY = 'lubox-cross-v1';
   const DB_NAME = 'lubox-cross-files';
-  let cloudClient = null;
-  let cloudUser = null;
-  let cloudLoading = false;
+  let remoteAuthenticated = false;
+  let remoteLoading = false;
   let cloudSaveTimer = null;
   let state = loadState();
   let selectedFile = null;
@@ -50,8 +49,8 @@
   }
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if(cloudClient&&cloudUser&&!cloudLoading&&!state.demo){
-      clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(saveCloudState,650);
+    if(remoteAuthenticated&&!remoteLoading&&!state.demo){
+      clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(saveRemoteState,650);
     }
   }
   function escapeHTML(value = '') { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -180,43 +179,42 @@
     if(!$('#reminders-enabled'))return;
     $('#reminders-enabled').checked=Boolean(state.settings?.whatsappRemindersEnabled);
     $('#reminder-days').value=Number(state.settings?.reminderDays)||14;
-    $('#reminders-enabled').disabled=!(cloudClient&&cloudUser);
-    $('#cloud-login').classList.toggle('hidden',Boolean(cloudUser));
-    $('#cloud-logout').classList.toggle('hidden',!cloudUser);
-    $('#cloud-email').classList.toggle('hidden',Boolean(cloudUser));
-    $('#cloud-password').classList.toggle('hidden',Boolean(cloudUser));
+    $('#reminders-enabled').disabled=!remoteAuthenticated;
+    $('#cloud-login').classList.toggle('hidden',remoteAuthenticated);
+    $('#cloud-logout').classList.toggle('hidden',!remoteAuthenticated);
+    $('#cloud-password').classList.toggle('hidden',remoteAuthenticated);
   }
-  async function saveCloudState() {
-    if(!cloudClient||!cloudUser||cloudLoading||state.demo)return;
-    cloudLoading=true;
-    const payload={owner_id:cloudUser.id,data:state,updated_at:new Date().toISOString()};
-    const {error}=await cloudClient.from('gym_state').upsert(payload,{onConflict:'owner_id'});
-    cloudLoading=false;
-    if(error){setCloudStatus(`No se pudo sincronizar: ${error.message}`);return;}
-    setCloudStatus(`Sincronizado con Supabase · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}.`);
+  async function saveRemoteState() {
+    if(!remoteAuthenticated||remoteLoading||state.demo)return false;
+    remoteLoading=true;
+    try{
+      const response=await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok){if(response.status===401)remoteAuthenticated=false;setCloudStatus(result.error||'No se pudo sincronizar con Neon.');updateAccountUI();return false;}
+      setCloudStatus(`Sincronizado con Neon · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}.`);
+      return true;
+    }catch(e){setCloudStatus('Sin conexión. Los cambios quedan guardados en este dispositivo y se reintentarán al volver la conexión.');return false;}
+    finally{remoteLoading=false;}
   }
-  async function loadCloudState() {
-    if(!cloudClient||!cloudUser)return;
-    cloudLoading=true;setCloudStatus('Cargando datos compartidos…');
-    const {data,error}=await cloudClient.from('gym_state').select('data').eq('owner_id',cloudUser.id).maybeSingle();
-    if(error){cloudLoading=false;setCloudStatus(`Error al leer Supabase: ${error.message}`);return;}
-    if(data?.data){state=normalizeState(data.data);state.demo=false;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));cloudLoading=false;render();setCloudStatus(`Cuenta conectada: ${cloudUser.email||'administrador'}. Datos sincronizados en Supabase.`);updateAccountUI();return;}
+  async function loadRemoteState() {
+    if(!remoteAuthenticated)return false;
+    remoteLoading=true;setCloudStatus('Cargando datos compartidos desde Neon…');
+    let response,result;
+    try{response=await fetch('/api/state');result=await response.json();}catch(e){remoteLoading=false;setCloudStatus('No se pudo conectar con Neon.');return false;}
+    if(!response.ok){if(response.status===401)remoteAuthenticated=false;remoteLoading=false;setCloudStatus(result.error||'Error al leer los datos compartidos.');updateAccountUI();return false;}
+    if(result.data){state=normalizeState(result.data);state.demo=false;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));remoteLoading=false;render();setCloudStatus('Conectado a Neon. Los datos están sincronizados.');updateAccountUI();return true;}
     if(state.demo){const settings={...state.settings};state={students:[],payments:[],settings,demo:false};}
     else state.demo=false;
-    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));cloudLoading=false;render();await saveCloudState();updateAccountUI();
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));remoteLoading=false;render();const saved=await saveRemoteState();updateAccountUI();return saved;
   }
-  async function setupCloud() {
+  async function setupRemoteSync() {
     try{
-      const response=await fetch('/api/public-config');if(!response.ok)return;
-      const config=await response.json();if(!config.supabaseUrl||!config.supabaseAnonKey)return;
-      if(!window.supabase?.createClient){setCloudStatus('No se pudo cargar el cliente Supabase. Revisá tu conexión.');return;}
-      cloudClient=window.supabase.createClient(config.supabaseUrl,config.supabaseAnonKey);
-      const {data}=await cloudClient.auth.getSession();
-      if(data.session){cloudUser=data.session.user;await loadCloudState();}
-      else setCloudStatus('Supabase configurado. Iniciá sesión para compartir los datos y activar el cron de WhatsApp.');
-      cloudClient.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){cloudUser=null;updateAccountUI();setCloudStatus('Sesión cerrada. Los cambios nuevos quedan en este dispositivo.');}});
+      const response=await fetch('/api/auth/session',{cache:'no-store'});if(!response.ok)return;
+      const result=await response.json();
+      if(result.authenticated){remoteAuthenticated=true;if(!(await loadRemoteState()))remoteAuthenticated=false;}
+      else setCloudStatus('Modo local. Iniciá sesión con la contraseña administradora para sincronizar con Neon.');
       updateAccountUI();
-    }catch(e){setCloudStatus('Modo local. Supabase todavía no está configurado en Vercel.');}
+    }catch(e){setCloudStatus('Modo local. La sincronización se activa al publicar en Vercel con Neon.');}
   }
   function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); }
   function isAndroid() { return /Android/i.test(navigator.userAgent); }
@@ -304,20 +302,26 @@
   $('#menu-toggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
   $('#account-open').addEventListener('click',()=>{updateAccountUI();$('#account-modal').showModal();});
   $('#cloud-login').addEventListener('click',async()=>{
-    if(!cloudClient){setCloudStatus('Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY en Vercel.');return;}
-    const email=$('#cloud-email').value.trim(),password=$('#cloud-password').value;
-    if(!email||!password){setCloudStatus('Ingresá el email y contraseña de tu cuenta administradora.');return;}
-    setCloudStatus('Conectando…');const {data,error}=await cloudClient.auth.signInWithPassword({email,password});
-    if(error){setCloudStatus(`No se pudo iniciar sesión: ${error.message}`);return;}
-    cloudUser=data.user;await loadCloudState();updateAccountUI();$('#cloud-password').value='';showToast('Cuenta conectada.');
+    const password=$('#cloud-password').value;
+    if(!password){setCloudStatus('Ingresá la contraseña administradora configurada en Vercel.');return;}
+    setCloudStatus('Conectando…');
+    try{
+      const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok){setCloudStatus(result.error||'No se pudo iniciar sesión.');return;}
+      remoteAuthenticated=true;const synced=await loadRemoteState();if(!synced){remoteAuthenticated=false;await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{});updateAccountUI();return;}updateAccountUI();$('#cloud-password').value='';showToast('Conectado a Neon.');
+    }catch(e){setCloudStatus('No se pudo conectar. Revisá la publicación en Vercel.');}
   });
-  $('#cloud-logout').addEventListener('click',async()=>{if(cloudSaveTimer){clearTimeout(cloudSaveTimer);await saveCloudState();}await cloudClient?.auth.signOut();});
+  $('#cloud-logout').addEventListener('click',async()=>{
+    if(cloudSaveTimer){clearTimeout(cloudSaveTimer);await saveRemoteState();}
+    await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{});remoteAuthenticated=false;updateAccountUI();setCloudStatus('Sesión cerrada. Los cambios nuevos quedan en este dispositivo.');
+  });
   $('#account-form').addEventListener('submit',e=>{
     e.preventDefault();const days=Number($('#reminder-days').value);
     if(!Number.isInteger(days)||days<1||days>180){showToast('Elegí un plazo entre 1 y 180 días.');return;}
     state.settings={...state.settings,reminderDays:days,whatsappRemindersEnabled:$('#reminders-enabled').checked};
     if(!state.demo)persist();else localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
-    render();$('#account-modal').close();showToast(cloudUser?'Configuración sincronizada.':'Plazo de aviso guardado en este dispositivo.');
+    render();$('#account-modal').close();showToast(remoteAuthenticated?'Configuración sincronizada.':'Plazo de aviso guardado en este dispositivo.');
   });
   $('#install-app').addEventListener('click',()=>{if(deferredInstallPrompt){installApp();return;}openInstallGuide();});
   $('#start-install').addEventListener('click',installApp);
@@ -357,11 +361,11 @@
   const upload=$('#upload-box');upload.addEventListener('dragover',e=>{e.preventDefault();upload.style.borderColor='var(--cyan)'});upload.addEventListener('dragleave',()=>upload.style.borderColor='');upload.addEventListener('drop',e=>{e.preventDefault();upload.style.borderColor='';selectReceipt(e.dataTransfer.files[0]);});
   $('#remove-file').addEventListener('click',()=>{selectedFile=null;if(selectedPreviewUrl)URL.revokeObjectURL(selectedPreviewUrl);selectedPreviewUrl=null;$('#receipt-file').value='';$('#upload-preview').classList.add('hidden');$('#upload-empty').classList.remove('hidden')});
   $('#student-name').addEventListener('input',()=>{});
-  $('#reset-demo').addEventListener('click',()=>{if(cloudUser){showToast('Desconectá la cuenta para restaurar los datos de ejemplo.');return;}state=seedState();persist();render();setView('inicio');showToast('Se restauraron los datos de ejemplo.');});
+  $('#reset-demo').addEventListener('click',()=>{if(remoteAuthenticated){showToast('Desconectá la cuenta para restaurar los datos de ejemplo.');return;}state=seedState();persist();render();setView('inicio');showToast('Se restauraron los datos de ejemplo.');});
   window.addEventListener('hashchange',()=>{const name=location.hash.slice(1);if(['inicio','alumnos','cuotas','comprobantes'].includes(name))setView(name)});
   const initial=location.hash.slice(1);setView(['inicio','alumnos','cuotas','comprobantes'].includes(initial)?initial:'inicio');render();
-  updateAccountUI();setupCloud();
-  window.addEventListener('online',()=>{if(cloudUser&&!state.demo)saveCloudState();});
+  updateAccountUI();setupRemoteSync();
+  window.addEventListener('online',()=>{if(remoteAuthenticated&&!state.demo)saveRemoteState();});
   if(isStandalone())$('#install-app').classList.add('hidden');
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 })();

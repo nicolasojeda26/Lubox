@@ -1,4 +1,5 @@
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v27.0';
+const {getSql} = require('../../lib/db');
 
 function argentinaToday() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -27,20 +28,6 @@ function normalizePhone(value = '') {
   if (digits.startsWith('00')) return digits.slice(2);
   if (!digits.startsWith('54')) digits = `549${digits.replace(/^0+/, '').replace(/^15/, '')}`;
   return digits;
-}
-
-async function supabaseRequest(path, init = {}) {
-  const base = process.env.SUPABASE_URL.replace(/\/$/, '');
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  return fetch(`${base}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      ...(init.headers || {})
-    }
-  });
 }
 
 async function sendTemplate(phone, name, overdueDays) {
@@ -73,48 +60,29 @@ async function sendTemplate(phone, name, overdueDays) {
   return body;
 }
 
-async function readReminderLog(owner, studentId, dueDate) {
-  const query = new URLSearchParams({
-    owner_id: `eq.${owner}`,
-    student_id: `eq.${studentId}`,
-    due_date: `eq.${dueDate}`,
-    select: 'status,updated_at'
-  });
-  const response = await supabaseRequest(`whatsapp_reminder_log?${query}`);
-  if (!response.ok) throw new Error('Could not read WhatsApp reminder log');
-  const rows = await response.json();
+async function readReminderLog(sql, studentId, dueDate) {
+  const rows = await sql`select status, updated_at from public.whatsapp_reminder_log where student_id = ${studentId} and due_date = ${dueDate}::date limit 1`;
   return rows[0] || null;
 }
 
-async function reserveReminder(owner, studentId, dueDate, existing) {
+async function reserveReminder(sql, studentId, dueDate, existing) {
   const now = new Date();
   if (existing?.status === 'sent') return false;
   if (existing?.status === 'pending' && now - new Date(existing.updated_at) < 60 * 60 * 1000) return false;
   if (existing) {
-    const query = new URLSearchParams({owner_id: `eq.${owner}`, student_id: `eq.${studentId}`, due_date: `eq.${dueDate}`});
-    const response = await supabaseRequest(`whatsapp_reminder_log?${query}`, {
-      method: 'PATCH', headers: {Prefer: 'return=minimal'},
-      body: JSON.stringify({status: 'pending', updated_at: now.toISOString(), error: null})
-    });
-    if (!response.ok) throw new Error('Could not reserve WhatsApp reminder');
+    await sql`update public.whatsapp_reminder_log set status = 'pending', updated_at = ${now.toISOString()}, error = null where student_id = ${studentId} and due_date = ${dueDate}::date`;
     return true;
   }
-  const response = await supabaseRequest('whatsapp_reminder_log?on_conflict=owner_id,student_id,due_date', {
-    method: 'POST',
-    headers: {Prefer: 'resolution=ignore-duplicates,return=representation'},
-    body: JSON.stringify({owner_id: owner, student_id: studentId, due_date: dueDate, status: 'pending', updated_at: now.toISOString()})
-  });
-  if (!response.ok) throw new Error('Could not reserve WhatsApp reminder');
-  return (await response.json()).length > 0;
+  const rows = await sql`insert into public.whatsapp_reminder_log (student_id, due_date, status, updated_at) values (${studentId}, ${dueDate}::date, 'pending', ${now.toISOString()}) on conflict (student_id, due_date) do nothing returning id`;
+  return rows.length > 0;
 }
 
-async function updateReminderLog(owner, studentId, dueDate, changes) {
-  const query = new URLSearchParams({owner_id: `eq.${owner}`, student_id: `eq.${studentId}`, due_date: `eq.${dueDate}`});
-  const response = await supabaseRequest(`whatsapp_reminder_log?${query}`, {
-    method: 'PATCH', headers: {Prefer: 'return=minimal'},
-    body: JSON.stringify({...changes, updated_at: new Date().toISOString()})
-  });
-  if (!response.ok) throw new Error('Could not update WhatsApp reminder log');
+async function updateReminderLog(sql, studentId, dueDate, changes) {
+  if (changes.status === 'sent') {
+    await sql`update public.whatsapp_reminder_log set status = 'sent', sent_at = ${changes.sent_at}, provider_message_id = ${changes.provider_message_id}, error = null, updated_at = now() where student_id = ${studentId} and due_date = ${dueDate}::date`;
+    return;
+  }
+  await sql`update public.whatsapp_reminder_log set status = 'failed', error = ${changes.error}, updated_at = now() where student_id = ${studentId} and due_date = ${dueDate}::date`;
 }
 
 module.exports = async (req, res) => {
@@ -123,21 +91,16 @@ module.exports = async (req, res) => {
     return res.status(401).json({error: 'Unauthorized'});
   }
 
-  const required = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_OWNER_ID', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_TEMPLATE_NAME'];
+  const required = ['DATABASE_URL', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_TEMPLATE_NAME'];
   const missing = required.filter(key => !process.env[key]);
   if (missing.length) return res.status(503).json({error: 'WhatsApp reminders are not configured', missing});
-  if (!/^[0-9a-f-]{36}$/i.test(process.env.SUPABASE_OWNER_ID)) return res.status(503).json({error: 'SUPABASE_OWNER_ID must be a Supabase Auth UUID'});
 
   try {
-    const ownerId = process.env.SUPABASE_OWNER_ID;
-    const owner = encodeURIComponent(ownerId);
-    const read = await supabaseRequest(`gym_state?owner_id=eq.${owner}&select=owner_id,data`);
-    if (!read.ok) return res.status(502).json({error: 'Could not read reminder state from Supabase'});
-    const rows = await read.json();
+    const sql = getSql();
+    const rows = await sql`select data from public.gym_state where id = 'lubox' limit 1`;
     if (!rows.length) return res.status(200).json({ok: true, sent: 0, skipped: 'No saved gym state'});
 
-    const row = rows[0];
-    const data = row.data || {};
+    const data = rows[0].data || {};
     const settings = data.settings || {};
     if (!settings.whatsappRemindersEnabled) return res.status(200).json({ok: true, sent: 0, skipped: 'Reminders are disabled in app settings'});
 
@@ -153,15 +116,15 @@ module.exports = async (req, res) => {
       const overdueDays = daysBetween(dueDate, today);
       if (overdueDays <= threshold || !student.id) continue;
       try {
-        const existing = await readReminderLog(owner, student.id, dueDate);
-        if (!await reserveReminder(ownerId, student.id, dueDate, existing)) continue;
+        const existing = await readReminderLog(sql, student.id, dueDate);
+        if (!await reserveReminder(sql, student.id, dueDate, existing)) continue;
         const result = await sendTemplate(normalizePhone(student.phone), student.name || 'alumno/a', overdueDays);
-        await updateReminderLog(ownerId, student.id, dueDate, {
+        await updateReminderLog(sql, student.id, dueDate, {
           status: 'sent', sent_at: new Date().toISOString(), provider_message_id: result.messages?.[0]?.id || null, error: null
         });
         sent += 1;
       } catch (error) {
-        await updateReminderLog(ownerId, student.id, dueDate, {status: 'failed', error: error.message}).catch(() => {});
+        await updateReminderLog(sql, student.id, dueDate, {status: 'failed', error: error.message}).catch(() => {});
         errors.push({studentId: student.id, message: error.message});
       }
     }
