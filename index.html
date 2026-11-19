@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111113" />
+  <meta name="description" content="Control de alumnos, cuotas y comprobantes de Lubox Cross Training." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Lubox Cross" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="assets/lubox-logo.jpg" />
+  <title>Lubox Cross · Control de cuotas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="features.css" />
+  <style>.status-neutral{background:#28282d;color:#aaaab2}.muted{color:#818188;font-size:8px}.install-trigger{height:31px;padding:0 10px;background:#172b31;border:1px solid #28515d;color:#70dff7;border-radius:7px;font-size:9px;font-weight:700}.install-trigger:hover{background:#203d45}.install-guide{width:min(440px,calc(100% - 26px))}.install-platform{padding:14px;background:#151517;border:1px solid #333339;border-radius:9px;margin:8px 0 12px}.install-platform h3{font:700 19px 'Barlow Condensed',sans-serif;margin:0 0 8px;color:#f4f4f2}.install-platform ol{margin:0;padding-left:19px;color:#c5c5c9;font-size:11px;line-height:1.8}.install-platform p{color:#9b9ba2;font-size:10px;line-height:1.6}.install-footnote{color:#7f7f86;font-size:9px;line-height:1.6;margin-top:12px}</style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#inicio" aria-label="Lubox Cross inicio">
+        <img src="assets/lubox-logo.jpg" alt="Lubox Cross Training" />
+        <span class="brand-copy"><b>LUBOX <i>CROSS</i></b><small>CONTROL DE CUOTAS</small></span>
+      </a>
+      <div class="side-label">GESTIÓN</div>
+      <nav class="side-nav" aria-label="Navegación principal">
+        <button class="nav-item active" data-view="inicio"><span class="nav-icon">▦</span>Resumen</button>
+        <button class="nav-item" data-view="alumnos"><span class="nav-icon">♙</span>Alumnos <span class="nav-count" id="nav-students">0</span></button>
+        <button class="nav-item" data-view="cuotas"><span class="nav-icon">◷</span>Cuotas</button>
+        <button class="nav-item" data-view="comprobantes"><span class="nav-icon">▧</span>Comprobantes</button>
+        <button class="nav-item" id="reminders-nav" type="button"><span class="nav-icon">☏</span>WhatsApp <span class="nav-count hidden" id="whatsapp-count">0</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="gym-card"><span class="gym-mark">L</span><div><b>Lubox Cross</b><small>Tu espacio, en orden</small></div><span class="online-dot"></span></div>
+        <button id="reset-demo" class="text-button">↻ <span>Restablecer datos de ejemplo</span></button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="mobile-menu" id="menu-toggle" aria-label="Abrir menú">☰</button>
+        <div class="crumb"><span>Lubox Cross</span><b>/</b><strong id="crumb-current">Resumen</strong></div>
+        <div class="top-actions"><button class="install-trigger" id="install-app" type="button">↓ Instalar app</button><span class="today" id="today-label"></span><button class="avatar" id="account-open" aria-label="Cuenta y recordatorios">L</button></div>
+      </header>
+
+      <section class="view active" id="view-inicio">
+        <div class="welcome-row"><div><div class="eyebrow"><span></span> PANEL DE CONTROL</div><h1>Que nada te saque <em>del ritmo.</em></h1><p class="intro">El estado de tus alumnos y cuotas, de un vistazo.</p></div><button class="button button-primary" data-open="payment"><span>＋</span> Registrar pago</button></div>
+        <div class="stat-grid">
+          <article class="stat-card"><div class="stat-top"><span>Alumnos activos</span><span class="stat-icon cyan">♙</span></div><strong id="stat-total">0</strong><small><span class="mini-dot cyan-dot"></span>En seguimiento</small><div class="stat-line cyan-line"></div></article>
+          <article class="stat-card"><div class="stat-top"><span>Al día</span><span class="stat-icon lime">✓</span></div><strong id="stat-current">0</strong><small><span class="mini-dot lime-dot"></span>Cuota vigente</small><div class="stat-line lime-line"></div></article>
+          <article class="stat-card"><div class="stat-top"><span>Vencen pronto</span><span class="stat-icon yellow">◷</span></div><strong id="stat-soon">0</strong><small>En los próximos 7 días</small><div class="stat-line yellow-line"></div></article>
+          <article class="stat-card attention"><div class="stat-top"><span>Revisar cuotas</span><span class="stat-icon pink">!</span></div><strong id="stat-late">0</strong><small>Más de 14 días vencidas</small><div class="stat-line pink-line"></div></article>
+        </div>
+
+        <div class="section-heading"><div><div class="eyebrow">SEGUIMIENTO</div><h2>Atención necesaria <span class="count-pill" id="late-count">0</span></h2></div><button class="link-button" data-goto="cuotas">Ver todas las cuotas <span>↗</span></button></div>
+        <div class="panel attention-panel"><div class="panel-head"><div><b>Alumnos con cuota atrasada</b><span id="late-caption">Más de 14 días desde su vencimiento</span></div><span class="status status-late"><i></i> REVISAR</span></div><div class="table-wrap"><table><thead><tr><th>ALUMNO</th><th>PLAN</th><th>VENCIMIENTO</th><th>ATRASO</th><th></th></tr></thead><tbody id="late-table"></tbody></table></div><div class="empty-state hidden" id="late-empty"><span class="empty-icon">✓</span><b>Todo en orden</b><span id="late-empty-caption">No hay cuotas con más de 14 días de atraso.</span></div></div>
+
+        <div class="section-heading recent-heading"><div><div class="eyebrow">MOVIMIENTOS</div><h2>Pagos recientes</h2></div><button class="link-button" data-goto="comprobantes">Ver historial <span>↗</span></button></div>
+        <div class="panel recent-panel"><div class="recent-list" id="recent-list"></div><div class="empty-state hidden" id="payments-empty"><span class="empty-icon">▧</span><b>Todavía no hay pagos</b><span>Cuando registres uno, aparecerá en este historial.</span></div></div>
+        <footer>HECHO PARA ENTRENAR. <b>HECHO PARA LUBOX.</b><span>•</span> CONTROL SIMPLE, DÍA A DÍA.</footer>
+      </section>
+
+      <section class="view" id="view-alumnos">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> TU COMUNIDAD</div><h1>Alumnos<span class="heading-period">.</span></h1><p class="intro">Gestioná los datos y el estado de cada persona.</p></div><button class="button button-primary" data-open="student"><span>＋</span> Agregar alumno</button></div>
+        <div class="toolbar"><label class="search-box"><span>⌕</span><input id="student-search" type="search" placeholder="Buscar por nombre o teléfono…" /></label><select id="student-filter" aria-label="Filtrar alumnos"><option value="all">Todos los estados</option><option value="current">Al día</option><option value="soon">Vence pronto</option><option value="grace">Vencida</option><option value="late">Atrasada</option><option value="unpaid">Sin pagos</option></select></div>
+        <div class="panel roster-panel"><div class="table-wrap"><table><thead><tr><th>ALUMNO</th><th>PLAN</th><th>ÚLTIMO PAGO</th><th>PRÓXIMO VENCIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody id="student-table"></tbody></table></div><div class="empty-state hidden" id="students-empty"><span class="empty-icon">♙</span><b>No encontramos alumnos</b><span>Probá con otra búsqueda o agregá un alumno.</span></div></div>
+      </section>
+
+      <section class="view" id="view-cuotas">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> ESTADO DE CUOTAS</div><h1>Cuotas<span class="heading-period">.</span></h1><p class="intro">Seguimiento de vencimientos y pagos del gimnasio.</p></div><button class="button button-primary" data-open="payment"><span>＋</span> Registrar pago</button></div>
+        <div class="due-summary" id="due-summary"></div>
+        <div class="toolbar"><label class="search-box"><span>⌕</span><input id="due-search" type="search" placeholder="Buscar alumno…" /></label><select id="due-filter" aria-label="Filtrar cuotas"><option value="all">Todos los estados</option><option value="current">Al día</option><option value="soon">Vence pronto</option><option value="grace">Vencida</option><option value="late">Atrasada</option><option value="unpaid">Sin pagos</option></select></div>
+        <div class="panel roster-panel"><div class="table-wrap"><table><thead><tr><th>ALUMNO</th><th>PLAN</th><th>ÚLTIMO PAGO</th><th>VENCIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody id="due-table"></tbody></table></div><div class="empty-state hidden" id="dues-empty"><span class="empty-icon">◷</span><b>No hay cuotas para mostrar</b><span>Probá con otro filtro.</span></div></div>
+      </section>
+
+      <section class="view" id="view-comprobantes">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> REGISTRO DE PAGOS</div><h1>Comprobantes<span class="heading-period">.</span></h1><p class="intro">Cada pago asociado a un alumno, con su comprobante.</p></div><button class="button button-primary" data-open="payment"><span>＋</span> Registrar pago</button></div>
+        <div class="toolbar"><label class="search-box"><span>⌕</span><input id="payment-search" type="search" placeholder="Buscar por alumno…" /></label><span class="toolbar-total" id="payment-total"></span></div>
+        <div class="panel receipts-panel"><div class="receipt-list" id="receipt-list"></div><div class="empty-state hidden" id="receipts-empty"><span class="empty-icon">▧</span><b>Sin comprobantes todavía</b><span>Subí una foto al registrar un pago para tenerla a mano.</span><button class="button button-outline" data-open="payment">Registrar primer pago</button></div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog class="modal" id="student-modal"><form id="student-form" method="dialog"><div class="modal-head"><div><div class="eyebrow"><span></span> FICHA DE ALUMNO</div><h2 id="student-modal-title">Nuevo alumno</h2></div><button class="close-button" type="button" data-close aria-label="Cerrar">×</button></div><input type="hidden" id="student-id"><div class="form-grid"><label class="field full">Nombre y apellido<input required id="student-name" placeholder="Ej. Martina Pérez" /></label><label class="field">WhatsApp<input id="student-phone" inputmode="tel" autocomplete="tel" placeholder="+54 9 11 1234 5678" /></label><label class="field">Plan<input id="student-plan" placeholder="Ej. 3 veces por semana" /></label><label class="field">Valor de cuota <span class="input-prefix"><i>$</i><input id="student-fee" type="number" min="0" placeholder="35000" /></span></label><label class="field">Fecha del último pago<input id="student-last-payment" type="date" /></label><label class="consent-field"><input id="student-whatsapp-optin" type="checkbox" /><span>Aceptó recibir recordatorios de cuotas por WhatsApp. Solo se enviarán avisos automáticos a alumnos que aceptaron.</span></label></div><div class="modal-actions"><button class="button button-quiet" type="button" data-close>Cancelar</button><button class="button button-primary" type="submit">Guardar alumno <span>→</span></button></div></form></dialog>
+
+  <dialog class="modal payment-modal" id="payment-modal"><form id="payment-form" method="dialog"><div class="modal-head"><div><div class="eyebrow"><span></span> NUEVO MOVIMIENTO</div><h2>Registrar pago</h2></div><button class="close-button" type="button" data-close aria-label="Cerrar">×</button></div><div class="upload-box" id="upload-box"><input id="receipt-file" type="file" accept="image/*" capture="environment" hidden /><div class="upload-empty" id="upload-empty"><div class="upload-icon">↥</div><b>Subí una foto del comprobante</b><span>JPG, PNG o captura de pantalla</span><button class="button button-outline" type="button" id="choose-file">Elegir imagen</button><small>La lectura automática ayuda a completar los datos. Revisalos antes de guardar.</small></div><div class="upload-preview hidden" id="upload-preview"><img id="receipt-preview" alt="Vista previa del comprobante" /><div class="preview-meta"><b id="receipt-filename"></b><span id="ocr-status">Imagen lista para revisar</span><button class="text-button" type="button" id="remove-file">Quitar imagen</button></div></div></div><div class="form-grid"><label class="field full">Alumno<select required id="payment-student"><option value="">Seleccionar alumno…</option></select></label><label class="field">Fecha de pago<input required id="payment-date" type="date" /></label><label class="field">Monto <span class="input-prefix"><i>$</i><input required id="payment-amount" type="number" min="0" placeholder="35000" /></span></label><label class="field full">Nota <span class="optional">OPCIONAL</span><input id="payment-note" placeholder="Ej. transferencia noviembre" /></label></div><div class="modal-actions"><button class="button button-quiet" type="button" data-close>Cancelar</button><button class="button button-primary" type="submit">Guardar pago <span>→</span></button></div></form></dialog>
+
+  <dialog class="modal image-modal" id="image-modal"><button class="close-button" type="button" data-close aria-label="Cerrar">×</button><img id="large-image" alt="Comprobante de pago" /><div class="image-caption" id="image-caption"></div></dialog>
+
+  <dialog class="modal install-guide" id="install-modal"><div class="modal-head"><div><div class="eyebrow"><span></span> LUBOX EN TU BOLSILLO</div><h2>Instalá la app</h2></div><button class="close-button" type="button" data-close aria-label="Cerrar">×</button></div><section class="install-platform hidden" id="install-android"><h3>Android</h3><p id="android-auto-copy">Instalá Lubox Cross en la pantalla de inicio para abrirla como una app.</p><ol id="android-steps"><li>Abrí esta página con Chrome.</li><li>Tocá <b>Instalar app</b> o el menú <b>⋮</b>.</li><li>Elegí <b>Instalar aplicación</b> o <b>Añadir a pantalla de inicio</b>.</li></ol><button class="button button-primary hidden" id="start-install" type="button">Instalar en Android <span>↓</span></button></section><section class="install-platform hidden" id="install-iphone"><h3>iPhone / iOS</h3><ol><li>Abrí esta página en <b>Safari</b>.</li><li>Tocá <b>Compartir</b> <span aria-label="Compartir">□↑</span>.</li><li>Elegí <b>Añadir a pantalla de inicio</b>.</li><li>Confirmá con <b>Añadir</b>.</li></ol><p>Después abrí Lubox Cross desde el ícono que aparecerá en tu pantalla de inicio.</p></section><section class="install-platform hidden" id="install-desktop"><h3>Computadora</h3><p>Usá el ícono de instalación en la barra de direcciones o el menú del navegador y elegí <b>Instalar Lubox Cross</b>.</p></section><p class="install-footnote">Necesitás abrir la app desde su dirección web segura (HTTPS). La instalación crea un acceso directo como app; no es una descarga desde Google Play o App Store.</p></dialog>
+  <dialog class="modal" id="account-modal"><form id="account-form" method="dialog"><div class="modal-head"><div><div class="eyebrow"><span></span> CUENTA Y AVISOS</div><h2>Recordatorios</h2></div><button class="close-button" type="button" data-close aria-label="Cerrar">×</button></div><p class="sync-state" id="cloud-status">Los datos se guardan en este dispositivo. Conectá Supabase para sincronizarlos entre teléfonos y habilitar el cron.</p><div class="form-grid"><label class="field full">Email administrador<input id="cloud-email" type="email" autocomplete="username" placeholder="tu@email.com" /></label><label class="field full">Contraseña<input id="cloud-password" type="password" autocomplete="current-password" placeholder="Contraseña de Supabase Auth" /></label><div class="field full"><button class="button button-outline" id="cloud-login" type="button">Conectar / sincronizar cuenta</button> <button class="button button-quiet hidden" id="cloud-logout" type="button">Cerrar sesión</button><div class="help-copy">La cuenta se crea en Supabase Auth. Las credenciales de servicio nunca se guardan en el navegador.</div></div><label class="setting-toggle field full"><input id="reminders-enabled" type="checkbox" /><span>Activar recordatorios automáticos por WhatsApp</span></label><label class="field full">Avisar cuando la cuota supere<input id="reminder-days" type="number" min="1" max="180" value="14" /><span class="help-copy">días de atraso. El cron revisa la deuda diariamente.</span></label></div><div class="modal-actions"><button class="button button-quiet" type="button" data-close>Cancelar</button><button class="button button-primary" type="submit">Guardar configuración <span>→</span></button></div></form></dialog>
+</body>
+</html>
